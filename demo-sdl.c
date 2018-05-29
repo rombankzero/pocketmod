@@ -6,9 +6,14 @@
 
 static void audio_callback(void *userdata, Uint8 *stream, int bytes)
 {
-    int samples_to_render = bytes / sizeof(float[2]);
+    int bytes_per_sample = sizeof(float[2]);
+    int samples_to_render = bytes / bytes_per_sample;
     pocketmod_context *context = (pocketmod_context*) userdata;
-    pocketmod_render(context, stream, samples_to_render);
+    do {
+        int rendered = pocketmod_render(context, stream, samples_to_render);
+        stream += rendered * bytes_per_sample;
+        samples_to_render -= rendered;
+    } while (samples_to_render > 0);
 }
 
 int main(int argc, char **argv)

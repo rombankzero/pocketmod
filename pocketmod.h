@@ -565,6 +565,11 @@ static void _pocketmod_next_sample(pocketmod_context *ctx, float *output)
         ctx->sample = 0;
     }
 
+    /* Stop here if we don't have an output buffer */
+    if (!output) {
+        return;
+    }
+
     /* Mix channels */
     output[0] = 0.0f;
     output[1] = 0.0f;
@@ -787,6 +792,7 @@ int pocketmod_init(pocketmod_context *ctx, const void *data, int size, int rate)
     ctx->line = -1;
     ctx->tick = ctx->ticks_per_line - 1;
     ctx->sample = ctx->samples_per_tick - 1;
+    _pocketmod_next_sample(ctx, 0);
     return 1;
 }
 
@@ -797,6 +803,9 @@ int pocketmod_render(pocketmod_context *ctx, void *buffer, int count)
         float (*samples)[2] = (float(*)[2]) buffer;
         for (i = 0; i < count; i++) {
             _pocketmod_next_sample(ctx, samples[i]);
+            if (!ctx->sample && !ctx->tick && !ctx->line) {
+                return i + 1;
+            }
         }
         return count;
     }
