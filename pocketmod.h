@@ -8,6 +8,7 @@ extern "C" {
 typedef struct pocketmod_context pocketmod_context;
 int pocketmod_init(pocketmod_context *ctx, const void *data, int size, int rate);
 int pocketmod_render(pocketmod_context *ctx, void *buffer, int samples);
+int pocketmod_loops(pocketmod_context *ctx);
 
 #ifndef POCKETMOD_MAX_CHANNELS
 #define POCKETMOD_MAX_CHANNELS 32
@@ -66,6 +67,10 @@ struct pocketmod_context
     int samples_per_second;     /* Sample rate (set by user)               */
     int samples_per_tick;       /* Depends on sample rate and BPM          */
     int ticks_per_line;         /* A.K.A. song speed (initially 6)         */
+
+    /* Loop detection state */
+    unsigned char visited[16];  /* Bit mask of previously visited patterns */
+    int loop_counter;           /* How many times the song has looped      */
 
     /* Playback state */
     _pocketmod_channel channels[POCKETMOD_MAX_CHANNELS];
@@ -798,18 +803,46 @@ int pocketmod_init(pocketmod_context *ctx, const void *data, int size, int rate)
 
 int pocketmod_render(pocketmod_context *ctx, void *buffer, int count)
 {
+    int i, j;
     if (ctx && buffer && count > 0) {
-        int i;
         float (*samples)[2] = (float(*)[2]) buffer;
         for (i = 0; i < count; i++) {
-            _pocketmod_next_sample(ctx, samples[i]);
+
+            /* When reaching a new pattern, mark it as visited */
             if (!ctx->sample && !ctx->tick && !ctx->line) {
-                return i + 1;
+                int index = ctx->pattern >> 3;
+                int bit = 1 << (ctx->pattern & 7);
+                ctx->visited[index] |= bit;
+            }
+
+            /* Generate another sample */
+            _pocketmod_next_sample(ctx, samples[i]);
+
+            /* Check if we reached a new pattern */
+            if (!ctx->sample && !ctx->tick && !ctx->line) {
+
+                /* Increment loop counter if we've seen this pattern before */
+                int index = ctx->pattern >> 3;
+                int bit = 1 << (ctx->pattern & 7);
+                if (ctx->visited[index] & bit) {
+                    for (j = 0; j < (int) sizeof(ctx->visited); j++) {
+                        ctx->visited[j] = 0;
+                    }
+                    ctx->loop_counter++;
+                }
+
+                /* Return early so the caller can decide whether to continue */
+                break;
             }
         }
-        return count;
+        return i;
     }
     return 0;
+}
+
+int pocketmod_loops(pocketmod_context *ctx)
+{
+    return ctx->loop_counter;
 }
 
 #endif /* #ifdef POCKETMOD_IMPLEMENTATION */
