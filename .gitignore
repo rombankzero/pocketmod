@@ -1,2 +1,5 @@
 demo-sdl
 demo-sdl.exe
+demo-wav
+demo-wav.exe
+*.wav
