@@ -5,7 +5,6 @@
 #include "pocketmod.h"
 
 #define SAMPLE_RATE 44100
-#define BUFFER_SIZE 1024
 
 /* Write a 16-bit little-endian integer to a file */
 static void fputw(unsigned short value, FILE *file)
@@ -21,8 +20,8 @@ static void fputl(unsigned long value, FILE *file)
     fputw(value >> 16, file);
 }
 
-/* Clamp a floating point value to the [-1, +1] range */
-static float saturate(float value)
+/* Clip a floating point sample to the [-1, +1] range */
+static float clip(float value)
 {
     value = value < -1.0f ? -1.0f : value;
     value = value > +1.0f ? +1.0f : value;
@@ -59,6 +58,12 @@ int main(int argc, char **argv)
     }
     fclose(file);
 
+    /* Initialize the renderer */
+    if (!pocketmod_init(&context, mod_data, mod_size, SAMPLE_RATE)) {
+        printf("error: '%s' is not a valid MOD file\n", argv[1]);
+        return -1;
+    }
+
     /* Open the output file */
     if (!(file = fopen(argv[2], "wb"))) {
         printf("error: can't open '%s' for writing\n", argv[2]);
@@ -81,33 +86,26 @@ int main(int argc, char **argv)
     fputs("data", file);          /* Subchunk2ID   */
     fputl(0, file);               /* Subchunk2Size */
 
-    /* Initialize the renderer */
-    if (!pocketmod_init(&context, mod_data, mod_size, SAMPLE_RATE)) {
-        printf("error: '%s' is not a valid MOD file\n", argv[1]);
-        return -1;
-    }
-
     /* Render the MOD file and write it as signed 16-bit PCM */
     while (pocketmod_loops(&context) == 0) {
-        float buffer[BUFFER_SIZE][2];
-        int rendered = pocketmod_render(&context, buffer, BUFFER_SIZE);
-        for (i = 0; i < rendered; i++) {
-            fputw(saturate(buffer[i][0]) * 0x7fff, file);
-            fputw(saturate(buffer[i][1]) * 0x7fff, file);
+        float buffer[512];
+        int rendered = pocketmod_render(&context, buffer, sizeof(buffer));
+        for (i = 0; i < rendered / sizeof(float); i++) {
+            fputw(clip(buffer[i]) * 0x7fff, file);
         }
-        samples += rendered;
+        samples += rendered / sizeof(float[2]);
     }
 
     /* Now that we know how many samples we got, we can go back and patch the */
     /* ChunkSize and Subchunk2Size fields in the WAV header */
     fseek(file, 4, SEEK_SET);
-    fputl(36 + samples * 4, file);
+    fputl(samples * 4 + 36, file);
     fseek(file, 40, SEEK_SET);
     fputl(samples * 4, file);
 
     /* Let the user know how big the output file is */
     printf("%s: ", argv[2]);
-    filesize = 40 + samples * 4;
+    filesize = 44 + samples * 4;
     if (filesize < 1000) {
         printf("%d bytes, ", filesize);
     } else if (filesize < 1000000) {
@@ -119,7 +117,7 @@ int main(int argc, char **argv)
     printf("%d min %02d s\n", seconds / 60, seconds % 60);
 
     /* Tidy up before leaving */
-    fclose(file);
     free(mod_data);
+    fclose(file);
     return 0;
 }

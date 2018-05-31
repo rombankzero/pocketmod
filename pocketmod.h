@@ -801,9 +801,11 @@ int pocketmod_init(pocketmod_context *ctx, const void *data, int size, int rate)
     return 1;
 }
 
-int pocketmod_render(pocketmod_context *ctx, void *buffer, int count)
+int pocketmod_render(pocketmod_context *ctx, void *buffer, int buffer_size)
 {
     int i, j;
+    int bytes_per_sample = sizeof(float[2]);
+    int count = buffer_size / bytes_per_sample;
     if (ctx && buffer && count > 0) {
         float (*samples)[2] = (float(*)[2]) buffer;
         for (i = 0; i < count; i++) {
@@ -835,7 +837,7 @@ int pocketmod_render(pocketmod_context *ctx, void *buffer, int count)
                 break;
             }
         }
-        return i;
+        return i * bytes_per_sample;
     }
     return 0;
 }

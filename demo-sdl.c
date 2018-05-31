@@ -4,16 +4,13 @@
 #define POCKETMOD_IMPLEMENTATION
 #include "pocketmod.h"
 
-static void audio_callback(void *userdata, Uint8 *stream, int bytes)
+static void audio_callback(void *userdata, Uint8 *buffer, int buffer_size)
 {
-    int bytes_per_sample = sizeof(float[2]);
-    int samples_to_render = bytes / bytes_per_sample;
-    pocketmod_context *context = (pocketmod_context*) userdata;
     do {
-        int rendered = pocketmod_render(context, stream, samples_to_render);
-        stream += rendered * bytes_per_sample;
-        samples_to_render -= rendered;
-    } while (samples_to_render > 0);
+        int rendered = pocketmod_render(userdata, buffer, buffer_size);
+        buffer_size -= rendered;
+        buffer += rendered;
+    } while (buffer_size > 0);
 }
 
 int main(int argc, char **argv)
