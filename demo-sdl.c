@@ -6,11 +6,11 @@
 
 static void audio_callback(void *userdata, Uint8 *buffer, int buffer_size)
 {
-    do {
+    while (buffer_size > 0) {
         int rendered = pocketmod_render(userdata, buffer, buffer_size);
         buffer_size -= rendered;
         buffer += rendered;
-    } while (buffer_size > 0);
+    }
 }
 
 int main(int argc, char **argv)
@@ -24,19 +24,19 @@ int main(int argc, char **argv)
     void *mod_data;
     size_t mod_size;
 
-    /* Print usage if no file was given. */
+    /* Print usage if no file was given */
     if (argc != 2) {
         printf("usage: %s <modfile>\n", argv[0]);
         return -1;
     }
 
-    /* Initialize SDL. */
+    /* Initialize SDL */
     if (SDL_Init(SDL_INIT_AUDIO | SDL_INIT_TIMER)) {
         printf("error: SDL_Init() failed: %s\n", SDL_GetError());
         return -1;
     }
 
-    /* Initialize the audio subsystem. */
+    /* Initialize the audio subsystem */
     SDL_memset(&format, 0, sizeof(format));
     format.freq = 44100;
     format.format = AUDIO_F32;
@@ -50,7 +50,7 @@ int main(int argc, char **argv)
         return -1;
     }
 
-    /* Read the MOD file into a heap block. */
+    /* Read the MOD file into a heap block */
     if (!(mod_file = SDL_RWFromFile(argv[1], "rb"))) {
         printf("error: can't open '%s' for reading\n", argv[1]);
         return -1;
@@ -63,23 +63,23 @@ int main(int argc, char **argv)
     }
     SDL_RWclose(mod_file);
 
-    /* Initialize the render context. */
+    /* Initialize the renderer */
     if (!pocketmod_init(&context, mod_data, mod_size, format.freq)) {
-        printf("error: pocketmod_init() failed\n");
+        printf("error: '%s' is not a valid MOD file\n", argv[1]);
         return -1;
     }
 
-    /* Start playback. */
+    /* Start playback */
     SDL_PauseAudioDevice(device, 0);
     start_time = SDL_GetTicks();
     for (;;) {
 
-        /* Measure the elapsed time. */
+        /* Measure the elapsed time */
         Uint32 elapsed_millisecs = SDL_GetTicks() - start_time;
         int minutes = elapsed_millisecs / 60000 % 100;
         int seconds = elapsed_millisecs / 1000 % 60;
 
-        /* Print some information during playback. */
+        /* Print some information during playback */
         printf("\rPlaying '%s' ", argv[1]);
         printf("[%02d:%02d] ", minutes, seconds);
         printf("Press Ctrl + C to stop");
