@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <time.h>
 
 #define POCKETMOD_IMPLEMENTATION
 #include "pocketmod.h"
@@ -28,11 +29,23 @@ static float clip(float value)
     return value;
 }
 
+/* Print file size and duration statistics */
+static void show_stats(char *filename, int samples)
+{
+    int seconds = (double) samples / SAMPLE_RATE;
+    int filesize = samples * 4 + 44;
+    printf("\rwriting: %s ", filename);
+    printf("[%.1f MB] ", filesize / 1000000.0);
+    printf("[%d:%02d]", seconds / 60, seconds % 60);
+    fflush(stdout);
+}
+
 int main(int argc, char **argv)
 {
     pocketmod_context context;
     void *mod_data;
-    int mod_size, samples, seconds, filesize, i;
+    int i, mod_size, samples = 0;
+    clock_t time_now, time_prev = 0;
     FILE *file;
 
     /* Print usage if no file was given */
@@ -86,15 +99,26 @@ int main(int argc, char **argv)
     fputs("data", file);          /* Subchunk2ID   */
     fputl(0, file);               /* Subchunk2Size */
 
-    /* Render the MOD file and write it as signed 16-bit PCM */
+    /* Write sample data */
     while (pocketmod_loops(&context) == 0) {
+
+        /* Render samples and write them as signed 16-bit PCM */
         float buffer[512];
         int rendered = pocketmod_render(&context, buffer, sizeof(buffer));
         for (i = 0; i < rendered / sizeof(float); i++) {
             fputw(clip(buffer[i]) * 0x7fff, file);
         }
         samples += rendered / sizeof(float[2]);
+
+        /* Print statistics at regular intervals */
+        time_now = clock();
+        if ((double) (time_now - time_prev) / CLOCKS_PER_SEC > 0.1) {
+            show_stats(argv[2], samples);
+            time_prev = time_now;
+        }
     }
+    show_stats(argv[2], samples);
+    putchar('\n');
 
     /* Now that we know how many samples we got, we can go back and patch the */
     /* ChunkSize and Subchunk2Size fields in the WAV header */
@@ -102,19 +126,6 @@ int main(int argc, char **argv)
     fputl(samples * 4 + 36, file);
     fseek(file, 40, SEEK_SET);
     fputl(samples * 4, file);
-
-    /* Let the user know how big the output file is */
-    printf("%s: ", argv[2]);
-    filesize = 44 + samples * 4;
-    if (filesize < 1000) {
-        printf("%d bytes, ", filesize);
-    } else if (filesize < 1000000) {
-        printf("%.0f kB, ", (double) filesize / 1000);
-    } else {
-        printf("%.0f MB, ", (double) filesize / 1000000);
-    }
-    seconds = (int) ((double) samples / SAMPLE_RATE);
-    printf("%d min %02d s\n", seconds / 60, seconds % 60);
 
     /* Tidy up before leaving */
     free(mod_data);
