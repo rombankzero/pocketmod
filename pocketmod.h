@@ -67,8 +67,8 @@ struct pocketmod_context
 
     /* Timing variables */
     int samples_per_second;     /* Sample rate (set by user)               */
-    int samples_per_tick;       /* Depends on sample rate and BPM          */
     int ticks_per_line;         /* A.K.A. song speed (initially 6)         */
+    float samples_per_tick;     /* Depends on sample rate and BPM          */
 
     /* Loop detection state */
     unsigned char visited[16];  /* Bit mask of previously visited patterns */
@@ -83,7 +83,7 @@ struct pocketmod_context
     signed char pattern;        /* Current pattern in order                */
     signed char line;           /* Current line in pattern                 */
     short tick;                 /* Current tick in line                    */
-    int sample;                 /* Current sample in tick                  */
+    float sample;               /* Current sample in tick                  */
 };
 
 #ifdef POCKETMOD_IMPLEMENTATION
@@ -581,9 +581,9 @@ static void _pocketmod_next_sample(pocketmod_context *c, float *output)
     int i;
 
     /* Move to the next tick if we were on the last sample */
-    if (++c->sample == c->samples_per_tick) {
+    if ((c->sample += 1.0f) >= c->samples_per_tick) {
         _pocketmod_next_tick(c);
-        c->sample = 0;
+        c->sample -= c->samples_per_tick;
     }
 
     /* Stop here if we don't have an output buffer */
@@ -808,11 +808,11 @@ int pocketmod_init(pocketmod_context *c, const void *data, int size, int rate)
     /* Prepare for rendering from the start */
     c->ticks_per_line = 6;
     c->samples_per_second = rate;
-    c->samples_per_tick = rate / 50;
+    c->samples_per_tick = rate / 50.0f;
     c->lfo_rng = 0xbadc0de;
     c->line = -1;
     c->tick = c->ticks_per_line - 1;
-    c->sample = c->samples_per_tick - 1;
+    c->sample = c->samples_per_tick - 1.0f;
     _pocketmod_next_sample(c, 0);
     return 1;
 }
@@ -830,7 +830,7 @@ int pocketmod_render(pocketmod_context *c, void *buffer, int buffer_size)
             _pocketmod_next_sample(c, samples[i]);
 
             /* Check if we reached a new pattern */
-            if (c->sample == 0 && c->tick == 0 && c->line == 0) {
+            if (c->sample < 1.0f && c->tick == 0 && c->line == 0) {
 
                 /* Increment loop counter if we've seen this pattern before */
                 int index = c->pattern >> 3;
