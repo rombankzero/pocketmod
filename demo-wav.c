@@ -100,15 +100,17 @@ int main(int argc, char **argv)
     fputl(0, file);               /* Subchunk2Size */
 
     /* Write sample data */
-    while (pocketmod_loops(&context) == 0) {
+    while (pocketmod_loop_count(&context) == 0) {
 
         /* Render samples and write them as signed 16-bit PCM */
-        float buffer[512];
-        int rendered = pocketmod_render(&context, buffer, sizeof(buffer));
-        for (i = 0; i < rendered / sizeof(float); i++) {
-            fputw(clip(buffer[i]) * 0x7fff, file);
+        float buffer[512][2];
+        int rendered_bytes = pocketmod_render(&context, buffer, sizeof(buffer));
+        int rendered_samples = rendered_bytes / sizeof(float[2]);
+        for (i = 0; i < rendered_samples; i++) {
+            fputw(clip(buffer[i][0]) * 0x7fff, file);
+            fputw(clip(buffer[i][1]) * 0x7fff, file);
         }
-        samples += rendered / sizeof(float[2]);
+        samples += rendered_samples;
 
         /* Print statistics at regular intervals */
         time_now = clock();

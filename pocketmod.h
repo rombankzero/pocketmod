@@ -10,7 +10,7 @@ extern "C" {
 typedef struct pocketmod_context pocketmod_context;
 int pocketmod_init(pocketmod_context *c, const void *data, int size, int rate);
 int pocketmod_render(pocketmod_context *c, void *buffer, int size);
-int pocketmod_loops(pocketmod_context *c);
+int pocketmod_loop_count(pocketmod_context *c);
 
 #ifndef POCKETMOD_MAX_CHANNELS
 #define POCKETMOD_MAX_CHANNELS 32
@@ -72,7 +72,7 @@ struct pocketmod_context
 
     /* Loop detection state */
     unsigned char visited[16];  /* Bit mask of previously visited patterns */
-    int loop_counter;           /* How many times the song has looped      */
+    int loop_count;             /* How many times the song has looped      */
 
     /* Render state */
     _pocketmod_chan channels[POCKETMOD_MAX_CHANNELS];
@@ -158,15 +158,23 @@ static const short _pocketmod_amiga_period[16][36] = {
      216, 203, 192, 181, 171, 161, 152, 144, 136, 128, 121, 114}
 };
 
-/* Various helper functions */
+/* Min/max helper functions */
 static int _pocketmod_min(int x, int y) { return x < y ? x : y; }
 static int _pocketmod_max(int x, int y) { return x > y ? x : y; }
 
+/* Clamp a volume value to the 0..64 range */
 static int _pocketmod_clamp_volume(int x)
 {
     x = _pocketmod_max(x, 0x00);
     x = _pocketmod_min(x, 0x40);
     return x;
+}
+
+/* Zero out a block of memory */
+static int _pocketmod_zero(void *data, int size)
+{
+    char *byte = data, *end = byte + size;
+    while (byte != end) { *byte++ = 0; }
 }
 
 /* Convert a period (at finetune = 0) to a note index in 0..35 */
@@ -576,19 +584,17 @@ static void _pocketmod_next_tick(pocketmod_context *c)
     }
 }
 
-static void _pocketmod_next_sample(pocketmod_context *c, float *output)
+static int _pocketmod_next_sample(pocketmod_context *c, float *output)
 {
-    int i;
+    int i, pattern_changed = 0;
+    const float volume_scale = 1.0f / (128 * 64 * 4);
+    const float balance_scale = 1.0f / 255.0f;
 
     /* Move to the next tick if we were on the last sample */
     if ((c->sample += 1.0f) >= c->samples_per_tick) {
         _pocketmod_next_tick(c);
         c->sample -= c->samples_per_tick;
-    }
-
-    /* Stop here if we don't have an output buffer */
-    if (!output) {
-        return;
+        pattern_changed = c->line == 0 && c->tick == 0;
     }
 
     /* Mix channels */
@@ -624,8 +630,8 @@ static void _pocketmod_next_sample(pocketmod_context *c, float *output)
 #endif
 
             /* Apply volume and stereo balance */
-            value *= ch->real_volume / (128.0f * 64.0f) * 0.25f;
-            balance = ch->balance / 255.0f;
+            value *= ch->real_volume * volume_scale;
+            balance = ch->balance * balance_scale;
             output[0] += value * (1.0f - balance);
             output[1] += value * (0.0f + balance);
 
@@ -643,6 +649,7 @@ static void _pocketmod_next_sample(pocketmod_context *c, float *output)
             }
         }
     }
+    return pattern_changed;
 }
 
 static int _pocketmod_ident(pocketmod_context *c, unsigned char *data, int size)
@@ -724,21 +731,22 @@ static int _pocketmod_ident(pocketmod_context *c, unsigned char *data, int size)
 int pocketmod_init(pocketmod_context *c, const void *data, int size, int rate)
 {
     int i, remaining, header_bytes, pattern_bytes;
-    unsigned char *byte;
+    unsigned char *byte = (unsigned char*) c;
     signed char *sample_data;
 
-    /* Start by zeroing out the whole context, for simplicity's sake */
-    byte = (unsigned char*) c;
-    for (i = 0; i < (int) sizeof(pocketmod_context); i++) {
-        byte[i] = 0;
-    }
-
     /* Check that arguments look more or less sane */
-    c->source = (unsigned char*) data;
-    if (!c || !data || rate <= 0 || size <= 0
-     || !_pocketmod_ident(c, (unsigned char*) data, size)) {
+    if (!c || !data || rate <= 0 || size <= 0) {
         return 0;
     }
+
+    /* Zero out the whole context, and identify the MOD type */
+    _pocketmod_zero(c, sizeof(pocketmod_context));
+    c->source = (unsigned char*) data;
+    if (!_pocketmod_ident(c, c->source, size)) {
+        return 0;
+    }
+
+    /* Start by zeroing out the whole context, for simplicity's sake */
 
     /* Check that we are compiled with support for enough channels */
     if (c->num_channels > POCKETMOD_MAX_CHANNELS) {
@@ -812,34 +820,25 @@ int pocketmod_init(pocketmod_context *c, const void *data, int size, int rate)
     c->lfo_rng = 0xbadc0de;
     c->line = -1;
     c->tick = c->ticks_per_line - 1;
-    c->sample = c->samples_per_tick - 1.0f;
-    _pocketmod_next_sample(c, 0);
+    _pocketmod_next_tick(c);
     return 1;
 }
 
 int pocketmod_render(pocketmod_context *c, void *buffer, int buffer_size)
 {
-    int i, j;
-    int bytes_per_sample = sizeof(float[2]);
+    int bytes_per_sample = sizeof(float[2]), i, j;
     int samples_to_render = buffer_size / bytes_per_sample;
     if (c && buffer && samples_to_render > 0) {
         float (*samples)[2] = (float(*)[2]) buffer;
         for (i = 0; i < samples_to_render; i++) {
 
             /* Generate another sample */
-            _pocketmod_next_sample(c, samples[i]);
-
-            /* Check if we reached a new pattern */
-            if (c->sample < 1.0f && c->tick == 0 && c->line == 0) {
+            if (_pocketmod_next_sample(c, samples[i])) {
 
                 /* Increment loop counter if we've seen this pattern before */
-                int index = c->pattern >> 3;
-                int bit = 1 << (c->pattern & 7);
-                if (c->visited[index] & bit) {
-                    for (j = 0; j < (int) sizeof(c->visited); j++) {
-                        c->visited[j] = 0;
-                    }
-                    c->loop_counter++;
+                if (c->visited[c->pattern >> 3] & (1 << (c->pattern & 7))) {
+                    _pocketmod_zero(c->visited, sizeof(c->visited));
+                    c->loop_count++;
                 }
 
                 /* Return early so the caller can decide whether to continue */
@@ -851,9 +850,9 @@ int pocketmod_render(pocketmod_context *c, void *buffer, int buffer_size)
     return 0;
 }
 
-int pocketmod_loops(pocketmod_context *c)
+int pocketmod_loop_count(pocketmod_context *c)
 {
-    return c->loop_counter;
+    return c->loop_count;
 }
 
 #endif /* #ifdef POCKETMOD_IMPLEMENTATION */
