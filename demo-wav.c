@@ -34,9 +34,10 @@ static void show_stats(char *filename, int samples)
 {
     int seconds = (double) samples / SAMPLE_RATE;
     int filesize = samples * 4 + 44;
-    printf("\rwriting: %s ", filename);
+    printf("\rWriting: '%s' ", filename);
     printf("[%.1f MB] ", filesize / 1000000.0);
-    printf("[%d:%02d]", seconds / 60, seconds % 60);
+    printf("[%d:%02d] ", seconds / 60, seconds % 60);
+    printf("Press Ctrl + C to stop");
     fflush(stdout);
 }
 
