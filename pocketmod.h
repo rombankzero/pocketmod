@@ -291,7 +291,7 @@ static void _pocketmod_volume_slide(_pocketmod_chan *ch, int param)
 static void _pocketmod_next_line(pocketmod_context *c)
 {
     unsigned char (*data)[4];
-    int i, pos;
+    int i, pos, pattern_break = -1;
 
     /* When entering a new pattern order index, mark it as "visited" */
     if (c->line == 0) {
@@ -389,11 +389,7 @@ static void _pocketmod_next_line(pocketmod_context *c)
 
             /* Dxy: Pattern break */
             case 0xD: {
-                int line = (ch->param >> 4) * 10 + (ch->param & 15);
-                c->line = (line < 64 ? line : 0) - 1;
-                if (++c->pattern == c->length) {
-                    c->pattern = c->reset;
-                }
+                pattern_break = (ch->param >> 4) * 10 + (ch->param & 15);
             } break;
 
             /* E4x: Set vibrato waveform */
@@ -449,6 +445,16 @@ static void _pocketmod_next_line(pocketmod_context *c)
             } break;
 
             default: break;
+        }
+    }
+
+    /* Pattern breaks are handled here, so that only one jump happens even when
+     * multiple Dxy commands appear on the same line. (You guessed it: There are
+     * songs that rely on this behavior!) */
+    if (pattern_break != -1) {
+        c->line = (pattern_break < 64 ? pattern_break : 0) - 1;
+        if (++c->pattern == c->length) {
+            c->pattern = c->reset;
         }
     }
 }
