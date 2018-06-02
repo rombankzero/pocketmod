@@ -232,9 +232,8 @@ static void _pocketmod_update_pitch(pocketmod_context *c, _pocketmod_chan *ch)
 {
     /* Don't do anything if the period is zero */
     ch->increment = 0.0f;
-    ch->dirty &= ~POCKETMOD_PITCH;
     if (ch->period) {
-        float freq, period = ch->period, semi = 1.0f;
+        float period = ch->period;
 
         /* Apply vibrato (if active) */
         if (ch->effect == 0x4 || ch->effect == 0x6) {
@@ -243,20 +242,23 @@ static void _pocketmod_update_pitch(pocketmod_context *c, _pocketmod_chan *ch)
             period += _pocketmod_lfo(c, ch, step) * rate / 128.0f;
 
         /* Apply arpeggio (if active) */
-        } else if (ch->effect == 0x0) {
+        } else if (ch->effect == 0x0 && ch->param) {
             static const float arpeggio[16] = { /* 2^(X/12) for X in 0..15 */
                 1.000000f, 1.059463f, 1.122462f, 1.189207f,
                 1.259921f, 1.334840f, 1.414214f, 1.498307f,
                 1.587401f, 1.681793f, 1.781797f, 1.887749f,
                 2.000000f, 2.118926f, 2.244924f, 2.378414f
             };
-            semi = arpeggio[(ch->param >> ((2 - c->tick % 3) << 2)) & 0x0f];
+            int step = (ch->param >> ((2 - c->tick % 3) << 2)) & 0x0f;
+            period /= arpeggio[step];
         }
 
-        /* Convert to Hz and update sample buffer increment */
-        freq = 7093789.2f / (period * 2.0f) * semi;
-        ch->increment = freq / c->samples_per_second;
+        /* Calculate sample buffer position increment */
+        ch->increment = 3546894.6f / (period * c->samples_per_second);
     }
+
+    /* Clear the pitch dirty flag */
+    ch->dirty &= ~POCKETMOD_PITCH;
 }
 
 static void _pocketmod_update_volume(pocketmod_context *c, _pocketmod_chan *ch)
@@ -745,14 +747,12 @@ int pocketmod_init(pocketmod_context *c, const void *data, int size, int rate)
         return 0;
     }
 
-    /* Zero out the whole context, and identify the MOD type */
+    /* Zero out the whole context and identify the MOD type */
     _pocketmod_zero(c, sizeof(pocketmod_context));
     c->source = (unsigned char*) data;
     if (!_pocketmod_ident(c, c->source, size)) {
         return 0;
     }
-
-    /* Start by zeroing out the whole context, for simplicity's sake */
 
     /* Check that we are compiled with support for enough channels */
     if (c->num_channels > POCKETMOD_MAX_CHANNELS) {
