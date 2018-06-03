@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <time.h>
 
 #define POCKETMOD_IMPLEMENTATION
@@ -44,7 +45,7 @@ static void show_stats(char *filename, int samples)
 int main(int argc, char **argv)
 {
     pocketmod_context context;
-    void *mod_data;
+    char *mod_data, *slash;
     int i, mod_size, samples = 0;
     clock_t time_now, time_prev = 0;
     FILE *file;
@@ -82,6 +83,11 @@ int main(int argc, char **argv)
     if (!(file = fopen(argv[2], "wb"))) {
         printf("error: can't open '%s' for writing\n", argv[2]);
         return -1;
+    }
+
+    /* Strip the directory part from the output file's path */
+    while ((slash = strpbrk(argv[2], "/\\"))) {
+        argv[2] = slash + 1;
     }
 
     /* Write the WAV header */

@@ -1,5 +1,6 @@
 #include <SDL2/SDL.h>
 #include <stdio.h>
+#include <string.h>
 
 #define POCKETMOD_IMPLEMENTATION
 #include "pocketmod.h"
@@ -21,7 +22,7 @@ int main(int argc, char **argv)
     SDL_AudioSpec format;
     SDL_AudioDeviceID device;
     SDL_RWops *mod_file;
-    void *mod_data;
+    char *mod_data, *slash;
     size_t mod_size;
 
     /* Print usage if no file was given */
@@ -67,6 +68,11 @@ int main(int argc, char **argv)
     if (!pocketmod_init(&context, mod_data, mod_size, format.freq)) {
         printf("error: '%s' is not a valid MOD file\n", argv[1]);
         return -1;
+    }
+
+    /* Strip the directory part from the source file's path */
+    while ((slash = strpbrk(argv[1], "/\\"))) {
+        argv[1] = slash + 1;
     }
 
     /* Start playback */
