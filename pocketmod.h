@@ -413,9 +413,9 @@ static void _pocketmod_next_line(pocketmod_context *c)
         }
     }
 
-    /* Pattern breaks are handled here, so that only one jump happens even when
-     * multiple Dxy commands appear on the same line. (You guessed it: There are
-     * songs that rely on this behavior!) */
+    /* Pattern breaks are handled here, so that only one jump happens even  */
+    /* when multiple Dxy commands appear on the same line. (You guessed it: */
+    /* There are songs that rely on this behavior!)                         */
     if (pattern_break != -1) {
         c->line = (pattern_break < 64 ? pattern_break : 0) - 1;
         if (++c->pattern == c->length) {
@@ -561,11 +561,17 @@ static int _pocketmod_next_sample(pocketmod_context *c, float *output)
     const float volume_scale = 1.0f / (128 * 64 * 4);
     const float balance_scale = 1.0f / 255.0f;
 
-    /* Move to the next tick if we were on the last sample */
+    /* Move to the next tick when reaching the last sample in a tick */
     if ((c->sample += 1.0f) >= c->samples_per_tick) {
         _pocketmod_next_tick(c);
         c->sample -= c->samples_per_tick;
-        pattern_changed = c->line == 0 && c->tick == 0;
+
+        /* Increment loop counter when reaching a previously visited pattern */
+        if ((pattern_changed = (c->line == 0 && c->tick == 0))
+         && c->visited[c->pattern >> 3] & (1 << (c->pattern & 7))) {
+            _pocketmod_zero(c->visited, sizeof(c->visited));
+            c->loop_count++;
+        }
     }
 
     /* Mix channels */
@@ -576,45 +582,37 @@ static int _pocketmod_next_sample(pocketmod_context *c, float *output)
         if (ch->position >= 0.0f && ch->sample) {
             _pocketmod_sample *sample = &c->samples[ch->sample - 1];
 
-            /* Resample instrument */
-#ifndef POCKETMOD_NO_INTERPOLATION
-            float s0, s1, t;
-            unsigned int x1;
-#endif
-            float balance, value;
+            /* Gather some loop data */
             unsigned char *data = POCKETMOD_SAMPLE(c, ch->sample);
-            unsigned int x0 = (unsigned int) ch->position;
-            unsigned int loop_start = ((data[4] << 8) | data[5]) << 1;
-            unsigned int loop_length = ((data[6] << 8) | data[7]) << 1;
-            unsigned int loop_end = loop_start + loop_length;
+            int loop_start = ((data[4] << 8) | data[5]) << 1;
+            int loop_length = ((data[6] << 8) | data[7]) << 1;
+            int loop_end = loop_length > 2 ? loop_start + loop_length : 0xfffff;
+
+            /* Resample the instrument */
+            int x0 = ch->position;
 #ifdef POCKETMOD_NO_INTERPOLATION
-            value = x0 < sample->length ? (float) sample->data[x0] : 0.0f;
+            float value = x0 < sample->length ? sample->data[x0] : 0;
 #else
-            x1 = x0 + 1;
-            if (loop_length > 2 && x1 >= loop_end) {
-                x1 -= loop_length;
-            }
-            t = ch->position - x0;
-            s0 = x0 < sample->length ? (float) sample->data[x0] : 0.0f;
-            s1 = x1 < sample->length ? (float) sample->data[x1] : 0.0f;
-            value = s0 * (1.0f - t) + s1 * t;
+            int x1 = x0 + 1 - loop_length * (x0 + 1 >= loop_end);
+            float s0 = x0 < sample->length ? sample->data[x0] : 0;
+            float s1 = x1 < sample->length ? sample->data[x1] : 0;
+            float t = ch->position - x0;
+            float value = s0 * (1.0f - t) + s1 * t;
 #endif
 
-            /* Apply volume and stereo balance */
+            /* Apply channel volume and stereo balance */
+            float balance = ch->balance * balance_scale;
             value *= ch->real_volume * volume_scale;
-            balance = ch->balance * balance_scale;
             output[0] += value * (1.0f - balance);
             output[1] += value * (0.0f + balance);
 
             /* Increment sample position, respecting loops */
             ch->position += ch->increment;
-            if (loop_length > 2) {
-                while (ch->position >= loop_end) {
-                    ch->position -= loop_length;
-                }
+            while (ch->position >= loop_end) {
+                ch->position -= loop_length;
             }
 
-            /* Cut sample if the end is reached */
+            /* Cut the sample if the end is reached */
             if (ch->position >= sample->length) {
                 ch->position = -1.0f;
             }
@@ -800,17 +798,7 @@ int pocketmod_render(pocketmod_context *c, void *buffer, int buffer_size)
     if (c && buffer && samples_to_render > 0) {
         float (*samples)[2] = (float(*)[2]) buffer;
         for (i = 0; i < samples_to_render; i++) {
-
-            /* Generate another sample */
             if (_pocketmod_next_sample(c, samples[i])) {
-
-                /* Increment loop counter if we've seen this pattern before */
-                if (c->visited[c->pattern >> 3] & (1 << (c->pattern & 7))) {
-                    _pocketmod_zero(c->visited, sizeof(c->visited));
-                    c->loop_count++;
-                }
-
-                /* Return early so the caller can decide whether to continue */
                 break;
             }
         }
