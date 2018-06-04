@@ -5,12 +5,11 @@
 #define POCKETMOD_IMPLEMENTATION
 #include "pocketmod.h"
 
-static void audio_callback(void *userdata, Uint8 *buffer, int buffer_size)
+static void audio_callback(void *userdata, Uint8 *buffer, int bytes)
 {
-    while (buffer_size > 0) {
-        int rendered = pocketmod_render(userdata, buffer, buffer_size);
-        buffer_size -= rendered;
-        buffer += rendered;
+    int i = 0;
+    while (i < bytes) {
+        i += pocketmod_render(userdata, buffer + i, bytes - i);
     }
 }
 
@@ -80,14 +79,10 @@ int main(int argc, char **argv)
     start_time = SDL_GetTicks();
     for (;;) {
 
-        /* Measure the elapsed time */
-        Uint32 elapsed_millisecs = SDL_GetTicks() - start_time;
-        int minutes = elapsed_millisecs / 60000 % 100;
-        int seconds = elapsed_millisecs / 1000 % 60;
-
         /* Print some information during playback */
+        int seconds = (SDL_GetTicks() - start_time) / 1000;
         printf("\rPlaying '%s' ", argv[1]);
-        printf("[%02d:%02d] ", minutes, seconds);
+        printf("[%d:%02d] ", seconds / 60, seconds % 60);
         printf("Press Ctrl + C to stop");
         fflush(stdout);
         SDL_Delay(500);
