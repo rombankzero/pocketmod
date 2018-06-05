@@ -37,7 +37,6 @@ int main(int argc, char **argv)
     }
 
     /* Initialize the audio subsystem */
-    SDL_memset(&format, 0, sizeof(format));
     format.freq = 44100;
     format.format = AUDIO_F32;
     format.channels = 2;
