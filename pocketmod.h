@@ -31,6 +31,7 @@ typedef struct {
     unsigned char volume;       /* Base volume without tremolo (0..64)     */
     unsigned char balance;      /* Stereo balance (0..255)                 */
     unsigned short period;      /* Note period (113..856)                  */
+    unsigned short delayed;     /* Delayed note period (113..856)          */
     unsigned short target;      /* Target period (for tone portamento)     */
     unsigned char finetune;     /* Note finetune (0..15)                   */
     unsigned char loop_count;   /* E6x loop counter                        */
@@ -292,8 +293,8 @@ static void _pocketmod_next_line(pocketmod_context *c)
                 unsigned char *sample_data = POCKETMOD_SAMPLE(c, sample);
                 ch->sample = sample;
                 ch->finetune = sample_data[2] & 0x0f;
+                ch->volume = _pocketmod_min(sample_data[3], 0x40);
                 if (ch->effect != 0xED) {
-                    ch->volume = _pocketmod_min(sample_data[3], 0x40);
                     ch->dirty |= POCKETMOD_VOLUME;
                 }
             } else {
@@ -307,11 +308,13 @@ static void _pocketmod_next_line(pocketmod_context *c)
             period += _pocketmod_finetune[ch->finetune][note];
             if (ch->effect != 0x3) {
                 if (ch->effect != 0xED) {
+                    ch->period = period;
+                    ch->dirty |= POCKETMOD_PITCH;
                     ch->position = 0.0f;
+                    ch->lfo_step = 0;
+                } else {
+                    ch->delayed = period;
                 }
-                ch->dirty |= POCKETMOD_PITCH;
-                ch->period = period;
-                ch->lfo_step = 0;
             }
         }
 
@@ -475,8 +478,8 @@ static void _pocketmod_next_tick(pocketmod_context *c)
             case 0xED: {
                 if (c->tick == param && ch->sample) {
                     unsigned char *data = POCKETMOD_SAMPLE(c, ch->sample);
-                    ch->volume = _pocketmod_min(0x40, data[3]);
-                    ch->dirty |= POCKETMOD_VOLUME;
+                    ch->dirty |= POCKETMOD_VOLUME | POCKETMOD_PITCH;
+                    ch->period = ch->delayed;
                     ch->position = 0.0f;
                     ch->lfo_step = 0;
                 }
