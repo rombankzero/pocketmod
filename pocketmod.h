@@ -559,70 +559,60 @@ static void _pocketmod_next_tick(pocketmod_context *c)
     }
 }
 
-static int _pocketmod_next_sample(pocketmod_context *c, float *output)
+static void _pocketmod_render_channel(pocketmod_context *c,
+                                      _pocketmod_chan *chan,
+                                      float (*output)[2],
+                                      int samples)
 {
-    int i, pattern_changed = 0;
-    const float volume_scale = 1.0f / (128 * 64 * 4);
-    const float balance_scale = 1.0f / 255.0f;
+    /* Gather some loop data */
+    _pocketmod_sample *sample = &c->samples[chan->sample - 1];
+    unsigned char *data = POCKETMOD_SAMPLE(c, chan->sample);
+    const int loop_start = ((data[4] << 8) | data[5]) << 1;
+    const int loop_length = ((data[6] << 8) | data[7]) << 1;
+    const int loop_end = loop_length > 2 ? loop_start + loop_length : 0xffffff;
+    const float sample_end = 1 + _pocketmod_min(loop_end, sample->length);
 
-    /* Move to the next tick when reaching the last sample in a tick */
-    if ((c->sample += 1.0f) >= c->samples_per_tick) {
-        _pocketmod_next_tick(c);
-        c->sample -= c->samples_per_tick;
+    /* Calculate left/right levels */
+    const float volume = chan->real_volume / (float) (128 * 64 * 4);
+    const float level_l = volume * (1.0f - chan->balance / 255.0f);
+    const float level_r = volume * (0.0f + chan->balance / 255.0f);
 
-        /* Increment loop counter when reaching a previously visited pattern */
-        if ((pattern_changed = (c->line == 0 && c->tick == 0))
-         && c->visited[c->pattern >> 3] & (1 << (c->pattern & 7))) {
-            _pocketmod_zero(c->visited, sizeof(c->visited));
-            c->loop_count++;
-        }
-    }
+    /* Write samples */
+    int i, count;
+    do {
 
-    /* Mix channels */
-    output[0] = 0.0f;
-    output[1] = 0.0f;
-    for (i = 0; i < c->num_channels; i++) {
-        _pocketmod_chan *ch = &c->channels[i];
-        if (ch->position >= 0.0f && ch->sample) {
-            _pocketmod_sample *sample = &c->samples[ch->sample - 1];
+        /* Calculate how many samples we can write in one go */
+        count = (sample_end - chan->position) / chan->increment;
+        count = _pocketmod_min(count, samples);
 
-            /* Gather some loop data */
-            unsigned char *data = POCKETMOD_SAMPLE(c, ch->sample);
-            int loop_start = ((data[4] << 8) | data[5]) << 1;
-            int loop_length = ((data[6] << 8) | data[7]) << 1;
-            int loop_end = loop_length > 2 ? loop_start + loop_length : 0xfffff;
-
-            /* Resample the instrument */
-            int x0 = ch->position;
+        /* Resample the instrument */
+        for (i = 0; i < count; i++) {
+            int x0 = (int) chan->position;
 #ifdef POCKETMOD_NO_INTERPOLATION
-            float value = x0 < sample->length ? sample->data[x0] : 0;
+            float s = sample->data[x0];
 #else
             int x1 = x0 + 1 - loop_length * (x0 + 1 >= loop_end);
-            float s0 = x0 < sample->length ? sample->data[x0] : 0;
-            float s1 = x1 < sample->length ? sample->data[x1] : 0;
-            float t = ch->position - x0;
-            float value = s0 * (1.0f - t) + s1 * t;
+            float t = chan->position - (float) x0;
+            float s = (1.0f - t) * sample->data[x0] + t * sample->data[x1];
 #endif
-
-            /* Apply channel volume and stereo balance */
-            float balance = ch->balance * balance_scale;
-            value *= ch->real_volume * volume_scale;
-            output[0] += value * (1.0f - balance);
-            output[1] += value * (0.0f + balance);
-
-            /* Increment sample position, respecting loops */
-            ch->position += ch->increment;
-            while (ch->position >= loop_end) {
-                ch->position -= loop_length;
-            }
-
-            /* Cut the sample if the end is reached */
-            if (ch->position >= sample->length) {
-                ch->position = -1.0f;
-            }
+            chan->position += chan->increment;
+            (*output)[0] += level_l * s;
+            (*output)[1] += level_r * s;
+            output++;
         }
-    }
-    return pattern_changed;
+
+        /* Rewind the sample when reaching the loop point */
+        if (chan->position >= loop_end) {
+            chan->position -= loop_length;
+
+        /* Cut the sample if the end is reached */
+        } else if (chan->position >= sample->length) {
+            chan->position = -1.0f;
+            break;
+        }
+
+        samples -= count;
+    } while (count > 0);
 }
 
 static int _pocketmod_ident(pocketmod_context *c, unsigned char *data, int size)
@@ -797,18 +787,46 @@ int pocketmod_init(pocketmod_context *c, const void *data, int size, int rate)
 
 int pocketmod_render(pocketmod_context *c, void *buffer, int buffer_size)
 {
-    int bytes_per_sample = sizeof(float[2]), i, j;
-    int samples_to_render = buffer_size / bytes_per_sample;
-    if (c && buffer && samples_to_render > 0) {
-        float (*samples)[2] = (float(*)[2]) buffer;
-        for (i = 0; i < samples_to_render; i++) {
-            if (_pocketmod_next_sample(c, samples[i])) {
-                break;
+    int i, rendered = 0;
+    int samples = buffer_size / sizeof(float[2]);
+    if (c && buffer) {
+        float (*output)[2] = (float(*)[2]) buffer;
+        while (samples > 0) {
+
+            /* Calculate the number of samples left in this tick */
+            int count = (int) (c->samples_per_tick - c->sample);
+            count = _pocketmod_max(count, 1);
+            count = _pocketmod_min(count, samples);
+
+            /* Render each channel */
+            _pocketmod_zero(output, count * sizeof(float[2]));
+            for (i = 0; i < c->num_channels; i++) {
+                _pocketmod_chan *chan = &c->channels[i];
+                if (chan->sample && chan->position >= 0.0f) {
+                    _pocketmod_render_channel(c, chan, output, count);
+                }
+            }
+            rendered += count;
+            samples -= count;
+            output += count;
+
+            /* Advance to the next tick and stop at the end of the pattern */
+            if ((c->sample += count) >= c->samples_per_tick) {
+                c->sample -= c->samples_per_tick;
+                _pocketmod_next_tick(c);
+                if (c->line == 0 && c->tick == 0) {
+
+                    /* Increment loop counter as needed */
+                    if (c->visited[c->pattern >> 3] & (1 << (c->pattern & 7))) {
+                        _pocketmod_zero(c->visited, sizeof(c->visited));
+                        c->loop_count++;
+                    }
+                    break;
+                }
             }
         }
-        return i * bytes_per_sample;
     }
-    return 0;
+    return rendered * sizeof(float[2]);
 }
 
 int pocketmod_loop_count(pocketmod_context *c)
