@@ -140,7 +140,7 @@ static int _pocketmod_clamp_volume(int x)
 }
 
 /* Zero out a block of memory */
-static int _pocketmod_zero(void *data, int size)
+static void _pocketmod_zero(void *data, int size)
 {
     char *byte = data, *end = byte + size;
     while (byte != end) { *byte++ = 0; }
@@ -477,7 +477,6 @@ static void _pocketmod_next_tick(pocketmod_context *c)
             /* EDx: Delay note for x ticks */
             case 0xED: {
                 if (c->tick == param && ch->sample) {
-                    unsigned char *data = POCKETMOD_SAMPLE(c, ch->sample);
                     ch->dirty |= POCKETMOD_VOLUME | POCKETMOD_PITCH;
                     ch->period = ch->delayed;
                     ch->position = 0.0f;
