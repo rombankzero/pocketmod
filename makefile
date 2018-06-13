@@ -16,7 +16,7 @@ help:
 	@ echo "  'make clean' to remove build artifacts"
 
 converter: examples/converter.c pocketmod.h
-	$(CC) $(filter %.c, $^) -o $@ -I.
+	$(CC) $(filter %.c, $^) -o $@ -I. -O2
 
 player: examples/player.c pocketmod.h
 	$(CC) $(filter %.c, $^) -o $@ -I. $(LDFLAGS) -lSDL2main -lSDL2

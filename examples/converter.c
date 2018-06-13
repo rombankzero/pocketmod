@@ -107,17 +107,21 @@ int main(int argc, char **argv)
     fputl(0, file);               /* Subchunk2Size */
 
     /* Write sample data */
+    float buffer[512][2];
+    short output[512][2];
     while (pocketmod_loop_count(&context) == 0) {
 
-        /* Render samples and write them as signed 16-bit PCM */
-        float buffer[512][2];
+        /* Render a chunk of samples */
         int rendered_bytes = pocketmod_render(&context, buffer, sizeof(buffer));
         int rendered_samples = rendered_bytes / sizeof(float[2]);
-        for (i = 0; i < rendered_samples; i++) {
-            fputw(clip(buffer[i][0]) * 0x7fff, file);
-            fputw(clip(buffer[i][1]) * 0x7fff, file);
-        }
         samples += rendered_samples;
+
+        /* Convert the sample data to 16-bit and write it to the file */
+        for (i = 0; i < rendered_samples; i++) {
+            output[i][0] = (short) (clip(buffer[i][0]) * 0x7fff);
+            output[i][1] = (short) (clip(buffer[i][1]) * 0x7fff);
+        }
+        fwrite(output, rendered_samples * sizeof(short[2]), 1, file);
 
         /* Print statistics at regular intervals */
         time_now = clock();
